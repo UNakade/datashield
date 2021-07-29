@@ -25,11 +25,11 @@ The plugin is written in `Python` and uses the `rpy2` library.
 Here, it is assumed that a DataSHIELD virtual machine is currently accessible at the IP address `192.168.56.100:8080` (please visit the [DataSHIELD wiki](https://data2knowledge.atlassian.net/wiki/spaces/DSDEV/overview) for instructions about how to get it running) and the `fdrtd` server is running on `localhost` on port `5000`.
 
 ```Python
-# First, initialize the `fdrtd` api:
+# First, initialize the fdrtd api:
 import fdrtd
 interface = fdrtd.HttpInterface("http://localhost:5000")  # insert appropriate server url here
 api = fdrtd.Api(interface)
-# Next, select the `datashield` microservice:
+# Next, select the datashield microservice:
 connection = api.select_microservice(microservice='datashield')
 # Define required variables for logging in:
 # list of servers is a list of kwargs dictionaries which will be passed on to the 
