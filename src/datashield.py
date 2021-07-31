@@ -4,29 +4,17 @@ from fdrtd_server.microservice import Microservice
 import fdrtd_server
 import rpy2
 import rpy2.rinterface
-import rpy2.robjects
 import rpy2.rinterface_lib
+from rpy2.rinterface_lib.embedded import RRuntimeError
 from rpy2.robjects.packages import importr
 from rpy2.robjects import r
-import numpy as np
-import json
-
-TRUE, FALSE = True, False
-NULL = rpy2.rinterface.NULL
+from threading import Thread
+import sys
+sys.path.append('./protocol_DataSHIELD/src')
+import helpers
 
 consolewrite_warnerror_backup = rpy2.rinterface_lib.callbacks.consolewrite_warnerror
 consolewrite_print_backup = rpy2.rinterface_lib.callbacks.consolewrite_print
-
-global_warnerror_array = []
-global_print_array = []
-
-
-def custom_callbacks(array, e):
-    array.append(e)
-
-
-rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: custom_callbacks(global_warnerror_array, e)
-rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: custom_callbacks(global_print_array, e)
 
 base = importr('base')
 DSI = importr('DSI')
@@ -35,129 +23,87 @@ dsBaseClient = importr('dsBaseClient')
 grDevices = importr('grDevices')
 jsonlite_R = importr('jsonlite')
 
-types_dict = {'integer': int, 'double': float, 'character': str, 'complex': complex, 'logical': bool}
 
+class Login(Microservice):
 
-def first_sweep(d):
-    if isinstance(d, list):
-        if len(d) == 1:
-            return first_sweep(d[0])
-        else:
-            return list([first_sweep(d[i]) for i in range(len(d))])
-    elif not isinstance(d, dict):
-        return d
-    else:
-        if 'type' not in d:
-            return dict((k, first_sweep(v)) for (k, v) in d.items())
-        elif d['type'] == 'NULL':
-            return None
-        elif d['type'] == 'list':
-            tempd = {'value': first_sweep(d['value'])}
-            if 'attributes' not in d:
-                return tempd['value']
+    def __init__(self, bus, endpoint):
+        super().__init__(bus, endpoint)
+        self.storage = {}
+        self.connection_callbacks_storage = {}
+
+    def list_functions(self):
+        return {
+            'login': {'public': True, 'pointer': self.login},
+            'get_status': {'public': True, 'pointer': self.get_status},
+            'login_helper': {'public': False, 'pointer': self.login_helper},
+            'get_result': {'public': True, 'pointer': self.get_result}
+        }
+
+    def login(self, list_of_servers, parameters=None, **kwargs):
+        if parameters is None:
+            parameters = {}
+        parameters.update(kwargs)
+        uuid = str(_uuid.uuid4())
+        self.storage[uuid] = {'warnerror': [], 'print': [], 'busy': True}
+        Thread(target=self.login_helper, args=(uuid, list_of_servers, parameters), daemon=True).start()
+        return self.callback(uuid)
+
+    def login_helper(self, uuid, list_of_servers, parameters):
+        rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: self.storage[uuid]['warnerror'].append(e)
+        rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: self.storage[uuid]['print'].append(e)
+        builder = r('builder%s <- DSI::newDSLoginBuilder()' % uuid.replace('-', ''))
+        for server in list_of_servers:
+            try:
+                builder['append'](**server)
+            except RRuntimeError as err:
+                self.storage[uuid]['busy'] = False
+                if "The server parameter cannot be empty" in str(err):
+                    raise fdrtd_server.exceptions.MissingParameter("server")
+                elif "The url parameter cannot be empty" in str(err):
+                    raise fdrtd_server.exceptions.MissingParameter("url")
+                elif "Duplicate server name: " in str(err):
+                    raise fdrtd_server.exceptions.InvalidParameter('server', 'duplicate')
+                else:
+                    raise fdrtd_server.exceptions.InternalServerError(str(err))
+            except Exception as err:
+                self.storage[uuid]['busy'] = False
+                raise fdrtd_server.exceptions.InternalServerError(str(err))
+        try:
+            connection = r('connections%s <- DSI::datashield.login(%s)'
+                           % (uuid.replace('-', ''), helpers.login_params_string_builder(parameters, uuid)))
+        except RRuntimeError as err:
+            self.storage[uuid]['busy'] = False
+            if 'The provided login details is missing both table and resource columns' in str(err):
+                raise fdrtd_server.exceptions.InvalidParameter('table, resource', 'both missing')
+            elif 'Unauthorized' in str(err):
+                raise fdrtd_server.exceptions.ApiError(401, 'Unauthorized')
             else:
-                for key in d['attributes']:
-                    tempd[key] = first_sweep(d['attributes'][key])
-                return tempd
-        else:
-            templist = list(map(lambda val: types_dict[d['type']](val) if val != 'NA' else 'NA', d['value']))
-            if len(templist) == 1:
-                templist = templist[0]
-            if d['attributes'] == {}:
-                return templist
-            else:
-                tempd = {'value': templist}
-                for key in d['attributes']:
-                    tempd[key] = first_sweep(d['attributes'][key])
-                return tempd
+                raise fdrtd_server.exceptions.InternalServerError(str(err))
+        except Exception as err:
+            self.storage[uuid]['busy'] = False
+            raise fdrtd_server.exceptions.InternalServerError(str(err))
+        self.storage[uuid]['busy'] = False
+        connection_microservice_uuid = self.bus.select_microservice(
+            requirements={'protocol': 'DataSHIELD', 'microservice': 'connection'}
+        )
+        self.connection_callbacks_storage[uuid] = self.bus.call_microservice(
+            handle=connection_microservice_uuid,
+            function='connect',
+            parameters={'connection': connection, 'uuid': uuid}
+        )
+        return None
 
+    def get_status(self, callback):
+        try:
+            return self.storage[callback]
+        except KeyError:
+            raise fdrtd_server.exceptions.InvalidParameter(f'uuid {callback}', 'not found')
 
-def second_sweep(d):
-    if isinstance(d, list):
-        return list([second_sweep(d[i]) for i in range(len(d))])
-    elif not isinstance(d, dict):
-        return d
-    elif d is None:
-        return d
-    else:
-        if set(d.keys()) == {'value'}:
-            return second_sweep(d['value'])
-        elif set(d.keys()) == {'value', 'names'}:
-            if not isinstance(second_sweep(d['value']), list):
-                return {second_sweep(d['names']): second_sweep(d['value'])}
-            else:
-                return dict(zip(second_sweep(d['names']), second_sweep(d['value'])))
-        elif set(d.keys()) == {'value', 'dim', 'dimnames'}:
-            if isinstance(second_sweep(d['dim']), list):
-                templist = np.reshape(second_sweep(d['value']), second_sweep(d['dim'])[::-1]).T.tolist()
-                if isinstance(second_sweep(d['dimnames']), list):
-                    if isinstance(second_sweep(d['dimnames'])[1], list):
-                        colnames = [None] + second_sweep(d['dimnames'])[1]
-                    else:
-                        colnames = [None] + [second_sweep(d['dimnames'])[1]]
-                    if len(templist) > 1:
-                        for i in range(len(templist)):
-                            templist[i] = [second_sweep(d['dimnames'])[0][i]] + templist[i]
-                    else:
-                        templist[0] = [second_sweep(d['dimnames'])[0]] + templist[0]
-                    return [colnames] + templist
-                elif isinstance(second_sweep(d['dimnames']), dict):
-                    tempdimnames = second_sweep(d['dimnames']['value'])
-                    rowcoltitles = second_sweep(d['dimnames']['names'])
-                    if tempdimnames[0] is not None:
-                        colnames = [rowcoltitles[0]] + tempdimnames[1]
-                        for i in range(len(templist)):
-                            templist[i] = [tempdimnames[0][i]] + templist[i]
-                        return {rowcoltitles[1]: [colnames] + templist}
-                    else:
-                        if not all([tempdimnames[1][i] == '' for i in range(len(tempdimnames[1]))]):
-                            return {rowcoltitles[1]: [tempdimnames[1]] + templist}
-                        else:
-                            return {rowcoltitles[1]: templist}
-            else:
-                return second_sweep(d['dimnames']) + second_sweep(d['value'])
-        elif set(d.keys()) == {'value', 'names', 'row.names', 'class'}:
-            templist = np.array(second_sweep(d['value'])).T.tolist()
-            colnames = [None] + second_sweep(d['names'])
-            if isinstance(second_sweep(d['row.names']), list):
-                for i in range(len(templist)):
-                    templist[i] = [second_sweep(d['row.names'])[i]] + templist[i]
-            else:
-                templist = [[second_sweep(d['row.names'])] + templist]
-            return {'value': [colnames] + templist, 'class': second_sweep(d['class'])}
-        elif set(d.keys()) == {'value', 'logarithm'}:
-            if second_sweep(d['logarithm']):
-                return np.e ** second_sweep(d['value'])
-            else:
-                return second_sweep(d['value'])
-        elif set(d.keys()) == {'value', 'names', 'class'}:
-            if not isinstance(second_sweep(d['value']), list):
-                return {second_sweep(d['names']): second_sweep(d['value']), 'class': second_sweep(d['class'])}
-            else:
-                tempd = dict(zip(second_sweep(d['names']), second_sweep(d['value'])))
-                tempd.update({'class': second_sweep(d['class'])})
-                return tempd
-        else:
-            return d
-
-
-def r_to_json(output):
-    return second_sweep(first_sweep(json.loads(jsonlite_R.serializeJSON(output)[0])))
-
-
-deprecated = ['ds.listOpals', 'ds.listServersideFunctions', 'ds.look', 'ds.meanByClass', 'ds.message',
-              'ds.recodeLevels', 'ds.setDefaultOpals', 'ds.subset', 'ds.subsetByClass', 'ds.table1D', 'ds.table2D',
-              'ds.vectorCalc']
-
-return_types = {'return': set(base.ls('package:dsBaseClient')) - {'ds.exp', 'ds.assign', 'ds.c', 'ds.recodeLevels',
-                                                                  'ds.changeRefGroup', 'ds.list', 'ds.log',
-                                                                  'ds.vectorCalc', 'ds.subset', 'ds.sqrt',
-                                                                  'ds.replaceNA', 'ds.abs', 'ds.subsetByClass',
-                                                                  'ds.heatmapPlot', 'ds.contourPlot'},
-                'plot': {'ds.histogram', 'ds.boxPlot', 'ds.contourPlot', 'ds.heatmapPlot', 'ds.scatterPlot'}}
-path_to_temp_plot_storage = ''
-input_type_requirements = {'x_vec': ['ds.vectorCalc']}
-plot_filenames_dict = {}
+    def get_result(self, callback):
+        try:
+            return self.connection_callbacks_storage[callback]
+        except KeyError:
+            fdrtd_server.exceptions.InvalidParameter(f'uuid {callback}', 'not found')
 
 
 class Connection(Microservice):
@@ -166,121 +112,199 @@ class Connection(Microservice):
 
         super().__init__(bus, endpoint)
 
-        self.connection = NULL
-        self.label = str(_uuid.uuid4())
+        self.connections = {}
+        self.storage = {}
+        self.function_callbacks_storage = {}
+        self.deprecated = {
+            'ds.listOpals', 'ds.listServersideFunctions', 'ds.look', 'ds.meanByClass', 'ds.message', 'ds.recodeLevels',
+            'ds.setDefaultOpals', 'ds.subset', 'ds.subsetByClass', 'ds.table1D', 'ds.table2D', 'ds.vectorCalc'
+        }
+        self.return_types = {
+            'return': set(base.ls('package:dsBaseClient')) - {
+                'ds.exp', 'ds.assign', 'ds.c', 'ds.recodeLevels', 'ds.changeRefGroup', 'ds.list', 'ds.log',
+                'ds.vectorCalc', 'ds.subset', 'ds.sqrt', 'ds.replaceNA', 'ds.abs', 'ds.subsetByClass', 'ds.heatmapPlot',
+                'ds.contourPlot'
+            },
+            'plot': {
+                'ds.histogram', 'ds.boxPlot', 'ds.contourPlot', 'ds.heatmapPlot', 'ds.scatterPlot'
+            }
+        }
+        self.input_type_requirements = {
+            'x_vec': ['ds.vectorCalc']
+        }
 
     def list_functions(self):
         functions_dict = {
-            'login': {'public': True, 'pointer': self.login},
+            'connect': {'public': False, 'pointer': self.connect},
             'call_function': {'public': True, 'pointer': self.call_function},
-            'logout': {'public': True, 'pointer': self.logout}
+            'call_function_helper': {'public': False, 'pointer': self.call_function_helper},
+            'logout': {'public': True, 'pointer': self.logout},
+            'logout_helper': {'public': False, 'pointer': self.logout_helper},
+            'get_status': {'public': True, 'pointer': self.get_status},
+            'get_result': {'public': True, 'pointer': self.get_result}
         }
         funcnames = list(base.ls('package:dsBaseClient'))
         for func in funcnames:
-            functions_dict[func[3:].replace('.', '_')] = {'public': True,
-                                                          'pointer': functools.partial(self.call_function, func=func)}
+            functions_dict[func[3:].replace('.', '_')] = {
+                'public': True,
+                'pointer': functools.partial(self.call_function, func=func)
+            }
         return functions_dict
 
-    def login(self, parameters):
-        login_warnerror_array = []
-        login_print_array = []
-        rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: custom_callbacks(login_warnerror_array, e)
-        rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: custom_callbacks(login_print_array, e)
-        return_dict = {}
-        try:
-            builder = r('builder <- DSI::newDSLoginBuilder()')
-            for server in parameters['list_of_servers']:
-                builder['append'](**server)
-            self.connection = r('connections%s <- DSI::datashield.login(logins=builder$build(), assign=%s, symbol="%s")'
-                                % (self.label.replace('-', ''), str(parameters.get('assign', False)).upper(),
-                                   parameters.get('symbol', 'D')))
-        except Exception as err:
-            return_dict['error'] = str(err)
-            if 'datashield.errors' in str(err):
-                return_dict['datashield.errors'] = str(DSI.datashield_errors())
-        rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: custom_callbacks(global_warnerror_array, e)
-        rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: custom_callbacks(global_print_array, e)
-        return_dict.update({'label': self.label, 'warnerror': ''.join(login_warnerror_array),
-                            'print': ''.join(login_print_array)})
-        if type(self.connection) is not type(NULL):
-            return_dict['connection'] = list(map(str, self.connection))
-        return return_dict
+    def connect(self, connection, uuid):
+        self.connections[uuid] = connection
+        self.storage[uuid] = {
+            'warnerror': [],
+            'print': [],
+            'busy': False,
+            'path_to_temp_plot_storage': '',
+            'calls': {}
+        }
+        self.function_callbacks_storage[uuid] = {}
+        rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: self.storage[uuid]['warnerror'].append(e)
+        rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: self.storage[uuid]['print'].append(e)
+        return self.callback({'connection': uuid})
 
-    def call_function(self, parameters, func):
+    def call_function(self, callback: dict, func: str, parameters: dict = None, **kwargs):
+        connection_uuid = callback['connection']
+        if parameters is None:
+            parameters = {}
+        parameters.update(kwargs)
+        call_uuid = str(_uuid.uuid4())
+        callback.update({'call': call_uuid})
+        self.storage[connection_uuid]['busy'] = True
+        self.storage[connection_uuid]['calls'][call_uuid] = {
+            'function': func,
+            'warnerror': [],
+            'print': [],
+            'busy': True
+        }
+        Thread(target=self.call_function_helper, args=(callback, func, parameters), daemon=True).start()
+        return self.callback(callback)
+
+    def call_function_helper(self, callback: dict, func: str, parameters: dict):
         func_ = func.replace('.', '_')
-        parameters_server = {}
-        parameters_unused = {}
-        func_warnerror_array = []
-        func_print_array = []
-        rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: custom_callbacks(func_warnerror_array, e)
-        rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: custom_callbacks(func_print_array, e)
-        func_formals = getattr(dsBaseClient, func_).formals()
-        d = {}
-        if type(func_formals) is not type(NULL):
-            func_formals = list(func_formals.items())
-            for n, o in func_formals:
-                d[n] = o[0]
-        for key in d:
-            if key not in parameters:
-                if key[-5:] == '.name' and key[:-5] in parameters:
-                    parameters_server[key] = parameters[key[:-5]]
-                else:
-                    parameters_server[key] = d[key]
+        connection_uuid = callback['connection']
+        call_uuid = callback['call']
+        connection = self.connections[connection_uuid]
+        if 'servers' in parameters:
+            if isinstance(parameters['servers'], list):
+                connection = connection.rx(base.c(*parameters['servers']))
             else:
-                parameters_server[key] = parameters[key]
-        for key in parameters:
-            if (key not in d) & (key + '.name' not in d):
-                parameters_unused[key] = parameters[key]
-        del parameters_server['datasources']
+                connection = connection.rx(parameters['servers'])
+        return_serial_json = parameters.get('return_serial_JSON', False)
+        call = self.storage[connection_uuid]['calls'][call_uuid]
+        rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: call['warnerror'].append(e)
+        rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: call['print'].append(e)
+        parameters_used = helpers.defaults(getattr(dsBaseClient, func_), parameters)
+        if 'datasources' in parameters_used:
+            parameters_used['datasources'] = connection
+        if func_ not in dir(dsBaseClient):
+            self.storage[connection_uuid]['busy'] = False
+            call['busy'] = False
+            raise fdrtd_server.exceptions.FunctionNotFound(f'{func} not in dsBaseClient')
         try:
-            if func_ in dir(dsBaseClient):
-                if func in return_types['plot']:
-                    plot_uuid = str(_uuid.uuid4())
-                    plot_name = plot_uuid + '.png'
-                    aspect_mul = 1
-                    if (parameters_server['type'] == 'split') | (parameters_server['type'][0] == 'split'):
-                        aspect_mul = len(self.connection)
-                    grDevices.png(filename=path_to_temp_plot_storage + plot_name, height=10, width=aspect_mul * 10,
-                                  units='in', res=300)
-                    return_r = getattr(dsBaseClient, func_)(**parameters_server, datasources=self.connection)
-                    grDevices.dev_off()
-                    return_dict = {'warnerror': ''.join(func_warnerror_array), 'print': ''.join(func_print_array),
-                                   'plot_file_uuid': plot_uuid}
-                    plot_filenames_dict[plot_uuid] = path_to_temp_plot_storage + plot_name
-                else:
-                    return_r = getattr(dsBaseClient, func_)(**parameters_server, datasources=self.connection)
-                    return_dict = {'warnerror': ''.join(func_warnerror_array), 'print': ''.join(func_print_array)}
-                return_dict['return_json_R'] = jsonlite_R.serializeJSON(return_r)[0]
-                if func in return_types['return']:
-                    return_dict['return_json'] = r_to_json(return_r)
-                else:
-                    return_dict['return_json'] = {}
-                rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: custom_callbacks(global_warnerror_array, e)
-                rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: custom_callbacks(global_print_array, e)
-                return return_dict
+            if func in self.return_types['plot']:
+                plot_uuid = str(_uuid.uuid4())
+                aspect_mul = 1
+                if (parameters_used['type'] == 'split') | (parameters_used['type'][0] == 'split'):
+                    aspect_mul = len(connection)
+                grDevices.png(
+                    filename=self.storage[connection_uuid]['path_to_temp_plot_storage'] + plot_uuid + '.png', height=10,
+                    width=aspect_mul * 10, units='in', res=300
+                )
+                return_r = getattr(dsBaseClient, func_)(**parameters_used)
+                grDevices.dev_off()
+                return_dict = {'plot_uuid': plot_uuid}
+                call['plot_uuid'] = plot_uuid
+                if func in self.return_types['return']:
+                    if return_serial_json:
+                        return_dict['return_serial_json'] = jsonlite_R.serializeJSON(return_r)[0]
+                    else:
+                        return_dict['return_json'] = helpers.r_to_json(return_r)
+                self.storage[connection_uuid]['busy'] = False
+                call['busy'] = False
+                self.function_callbacks_storage[connection_uuid][call_uuid] = return_dict
+                return None
             else:
-                raise fdrtd_server.exceptions.FunctionNotFound(func)
+                return_r = getattr(dsBaseClient, func_)(**parameters_used)
+                self.storage[connection_uuid]['busy'] = False
+                call['busy'] = False
+                if func in self.return_types['return']:
+                    if return_serial_json:
+                        self.function_callbacks_storage[connection_uuid][call_uuid] = jsonlite_R.serializeJSON(
+                            return_r)[0]
+                        return None
+                    else:
+                        self.function_callbacks_storage[connection_uuid][call_uuid] = helpers.r_to_json(return_r)
+                        return None
+                self.function_callbacks_storage[connection_uuid][call_uuid] = None
+                return None
         except Exception as err:
-            error_dict = {'warnerror': ''.join(func_warnerror_array), 'print': ''.join(func_print_array),
-                          'error': str(err)}
+            self.storage[connection_uuid]['busy'] = False
+            call['busy'] = False
             if 'datashield.errors' in str(err):
-                error_dict['datashield.errors'] = str(DSI.datashield_errors())
-            return error_dict
+                raise fdrtd_server.exceptions.InternalServerError(
+                    f'Error: \n {str(err)} \n datashield.errors(): \n {str(DSI.datashield_errors())}'
+                )
+            else:
+                raise fdrtd_server.exceptions.InternalServerError(f'Error: \n{str(err)}')
 
-    def logout(self):
-        logout_warnerror_array = []
-        logout_print_array = []
-        rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: custom_callbacks(logout_warnerror_array, e)
-        rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: custom_callbacks(logout_print_array, e)
-        return_dict = {}
+    def logout(self, callback: dict):
+        connection_uuid = callback['connection']
+        call_uuid = str(_uuid.uuid4())
+        self.storage[connection_uuid]['calls'][call_uuid] = {
+            'function': 'logout',
+            'warnerror': [],
+            'print': [],
+            'busy': True
+        }
+        self.storage[connection_uuid]['busy'] = True
+        callback.update({'call': call_uuid})
+        Thread(target=self.logout_helper, args=(callback,), daemon=True).start()
+        return self.callback(callback)
+
+    def logout_helper(self, callback: dict):
+        connection_uuid = callback['connection']
+        call_uuid = callback['call']
+        connection = self.connections[connection_uuid]
+        call = self.storage[connection_uuid]['calls'][call_uuid]
+        rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: call['warnerror'].append(e)
+        rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: call['print'].append(e)
         try:
-            self.connection = DSI.datashield_logout(self.connection)
+            return_r = DSI.datashield_logout(connection)
+            call['busy'] = False
+            self.storage[connection_uuid]['busy'] = False
+            # del self.connections[callback['connection']]
+            self.function_callbacks_storage[connection_uuid][call_uuid] = None
+            return None
         except Exception as err:
-            return_dict['error'] = str(err)
+            call['busy'] = False
+            self.storage[connection_uuid]['busy'] = False
+            err_str = str(err)
             if 'datashield.errors' in str(err):
-                return_dict['datashield.errors'] = str(DSI.datashield_errors())
-        return_dict['warnerror'] = ''.join(logout_warnerror_array)
-        return_dict['print'] = ''.join(logout_print_array)
-        rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: custom_callbacks(global_warnerror_array, e)
-        rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: custom_callbacks(global_print_array, e)
-        return return_dict
+                err_str += str(DSI.datashield_errors())
+            self.function_callbacks_storage[connection_uuid][call_uuid] = {'error': err_str}
+            raise fdrtd_server.exceptions.InternalServerError(err_str)
+
+    def get_status(self, callback):
+        connection_uuid = callback['connection']
+        call_uuid = callback['call']
+        try:
+            return self.storage[connection_uuid]['calls'][call_uuid]
+        except KeyError:
+            if connection_uuid not in self.storage:
+                raise fdrtd_server.exceptions.InvalidParameter(f'connection {connection_uuid}', 'not found')
+            else:
+                raise fdrtd_server.exceptions.InvalidParameter(f'call {call_uuid}', 'not found')
+
+    def get_result(self, callback):
+        connection_uuid = callback['connection']
+        call_uuid = callback['call']
+        try:
+            return self.function_callbacks_storage[connection_uuid][call_uuid]
+        except KeyError:
+            if connection_uuid not in self.function_callbacks_storage:
+                raise fdrtd_server.exceptions.InvalidParameter(f'connection {connection_uuid}', 'not found')
+            else:
+                raise fdrtd_server.exceptions.InvalidParameter(f'call {call_uuid}', 'not found')

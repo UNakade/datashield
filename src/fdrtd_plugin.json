@@ -6,7 +6,18 @@
         "namespace": "fdrtd",
         "protocol": "DataSHIELD",
         "version": "0.2.0",
-        "microservice": "datashield"
+        "microservice": "login"
+      },
+      "classfile": "datashield.py",
+      "classname": "Login",
+      "language": "Python"
+    },
+    {
+      "identifiers": {
+        "namespace": "fdrtd",
+        "protocol": "DataSHIELD",
+        "version": "0.2.0",
+        "microservice": "connection"
       },
       "classfile": "datashield.py",
       "classname": "Connection",
