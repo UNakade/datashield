@@ -27,4 +27,4 @@ python3 -m openapi_server -port:5000
 ```
 And that's all! You now have a `fdrtd_server` running on `http://localhost:5000`!
 
-For a detailed example on how to use the `protocol_DataSHIELD` on the client side, please refer `protocol_DataSHIELD/src/example.py`.
+For a detailed example on how to use the `protocol_DataSHIELD` on the client side, please refer `protocol_DataSHIELD/examples/example.py`.
