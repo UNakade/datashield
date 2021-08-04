@@ -18,7 +18,7 @@ The plugin is written in `Python` and uses the `rpy2` library.
 
 
 ### Installation:
-Installing and running `fdrtd_server` with the `protocol_DataSHIELD` is very simple and takes only 4 commands:
+Installing and running `fdrtd_server` with `protocol_DataSHIELD` is very simple and takes only 4 commands:
 ```shell
 git clone https://github.com/fdrtd/server
 cd server

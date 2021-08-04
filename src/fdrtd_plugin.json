@@ -10,7 +10,8 @@
       },
       "classfile": "datashield.py",
       "classname": "Login",
-      "language": "Python"
+      "language": "Python",
+      "public": ["login", "get_status", "get_result"]
     },
     {
       "identifiers": {
@@ -21,7 +22,8 @@
       },
       "classfile": "datashield.py",
       "classname": "Connection",
-      "language": "Python"
+      "language": "Python",
+      "public": ["call_function", "logout", "get_status", "get_result"]
     }
   ]
 }

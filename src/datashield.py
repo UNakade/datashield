@@ -31,14 +31,6 @@ class Login(Microservice):
         self.storage = {}
         self.connection_callbacks_storage = {}
 
-    def list_functions(self):
-        return {
-            'login': {'public': True, 'pointer': self.login},
-            'get_status': {'public': True, 'pointer': self.get_status},
-            'login_helper': {'public': False, 'pointer': self.login_helper},
-            'get_result': {'public': True, 'pointer': self.get_result}
-        }
-
     def login(self, list_of_servers, parameters=None, **kwargs):
         if parameters is None:
             parameters = {}
@@ -133,22 +125,11 @@ class Connection(Microservice):
             'x_vec': ['ds.vectorCalc']
         }
 
-    def list_functions(self):
-        functions_dict = {
-            'connect': {'public': False, 'pointer': self.connect},
-            'call_function': {'public': True, 'pointer': self.call_function},
-            'call_function_helper': {'public': False, 'pointer': self.call_function_helper},
-            'logout': {'public': True, 'pointer': self.logout},
-            'logout_helper': {'public': False, 'pointer': self.logout_helper},
-            'get_status': {'public': True, 'pointer': self.get_status},
-            'get_result': {'public': True, 'pointer': self.get_result}
-        }
+    def make_public(self):
+        functions_dict = {}
         funcnames = list(base.ls('package:dsBaseClient'))
         for func in funcnames:
-            functions_dict[func[3:].replace('.', '_')] = {
-                'public': True,
-                'pointer': functools.partial(self.call_function, func=func)
-            }
+            functions_dict[func[3:].replace('.', '_')] = functools.partial(self.call_function, func=func)
         return functions_dict
 
     def connect(self, connection, uuid):
