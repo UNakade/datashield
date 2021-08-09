@@ -8,7 +8,7 @@
         "version": "0.2.0",
         "microservice": "login"
       },
-      "classfile": "datashield.py",
+      "classfile": "login.py",
       "classname": "Login",
       "language": "Python",
       "public": ["login", "get_status", "get_result"]
@@ -20,7 +20,7 @@
         "version": "0.2.0",
         "microservice": "connection"
       },
-      "classfile": "datashield.py",
+      "classfile": "connection.py",
       "classname": "Connection",
       "language": "Python",
       "public": ["call_function", "logout", "get_status", "get_result"]
