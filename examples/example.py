@@ -76,6 +76,7 @@ connection_callback = result(login_callback)
 
 # Full example:
 quantileMean_result = result(connection_callback.quantileMean(x='D$LAB_HDL'))
+print(quantileMean_result)
 
 # To logout from the DataSHIELD servers:
 logout_result = result(connection_callback.logout())

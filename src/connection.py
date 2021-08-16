@@ -8,10 +8,7 @@ import rpy2.rinterface_lib
 # from rpy2.rinterface_lib.embedded import RRuntimeError
 from rpy2.robjects.packages import importr
 from threading import Thread
-import sys
-
-sys.path.append('./protocol_DataSHIELD/src')
-import helpers
+from protocol_DataSHIELD.src import helpers
 
 consolewrite_warnerror_backup = rpy2.rinterface_lib.callbacks.consolewrite_warnerror
 consolewrite_print_backup = rpy2.rinterface_lib.callbacks.consolewrite_print
