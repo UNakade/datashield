@@ -1,13 +1,15 @@
 import uuid as _uuid
-from fdrtd_server.microservice import Microservice
-import fdrtd_server
+from threading import Thread
+
 import rpy2
 import rpy2.rinterface
 import rpy2.rinterface_lib
 from rpy2.rinterface_lib.embedded import RRuntimeError
 from rpy2.robjects.packages import importr
 from rpy2.robjects import r
-from threading import Thread
+
+import fdrtd_server
+from fdrtd_server.microservice import Microservice
 from protocol_DataSHIELD.src import helpers
 
 consolewrite_warnerror_backup = rpy2.rinterface_lib.callbacks.consolewrite_warnerror

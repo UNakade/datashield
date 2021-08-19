@@ -2,7 +2,7 @@
 # which is very easy to do, just follow these 4 steps:
 # git clone https://github.com/fdrtd/server
 # cd server
-# git clone https://github.com/fdrtd/server/protocol_DataSHIELD
+# git clone https://github.com/fdrtd/protocol_DataSHIELD
 # python3 -m openapi_server -port:5000
 
 # Now on the client side:

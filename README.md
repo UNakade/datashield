@@ -22,9 +22,9 @@ Installing and running `fdrtd_server` with `protocol_DataSHIELD` is very simple 
 ```shell
 git clone https://github.com/fdrtd/server
 cd server
-git clone https://github.com/fdrtd/server/protocol_DataSHIELD
+git clone https://github.com/fdrtd/protocol_DataSHIELD
 python3 -m openapi_server -port:5000 
 ```
 And that's all! You now have a `fdrtd_server` running on `http://localhost:5000`!
 
-For a detailed example on how to use the `protocol_DataSHIELD` on the client side, please refer `protocol_DataSHIELD/examples/example.py`.
+For a detailed example on how to use the `protocol_DataSHIELD` plugin on the client side, please refer `protocol_DataSHIELD/examples/example.py`.
