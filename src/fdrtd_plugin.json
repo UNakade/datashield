@@ -1,6 +1,5 @@
 {
-  "microservices":
-  [
+  "microservices": [
     {
       "identifiers": {
         "namespace": "fdrtd",
@@ -11,7 +10,11 @@
       "classfile": "login.py",
       "classname": "Login",
       "language": "Python",
-      "public": ["login", "get_status", "get_result"]
+      "public": [
+        "login",
+        "get_status",
+        "get_result"
+      ]
     },
     {
       "identifiers": {
@@ -23,7 +26,12 @@
       "classfile": "connection.py",
       "classname": "Connection",
       "language": "Python",
-      "public": ["call_function", "logout", "get_status", "get_result"]
+      "public": [
+        "call_function",
+        "logout",
+        "get_status",
+        "get_result"
+      ]
     }
   ]
 }

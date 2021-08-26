@@ -4,7 +4,6 @@ from threading import Thread
 import rpy2
 import rpy2.rinterface
 import rpy2.rinterface_lib
-from rpy2.rinterface_lib.embedded import RRuntimeError
 from rpy2.robjects.packages import importr
 from rpy2.robjects import r
 
@@ -46,33 +45,15 @@ class Login(Microservice):
         for server in list_of_servers:
             try:
                 builder['append'](**server)
-            except RRuntimeError as err:
-                self.storage[uuid]['busy'] = False
-                if "The server parameter cannot be empty" in str(err):
-                    raise fdrtd_server.exceptions.MissingParameter("server")
-                elif "The url parameter cannot be empty" in str(err):
-                    raise fdrtd_server.exceptions.MissingParameter("url")
-                elif "Duplicate server name: " in str(err):
-                    raise fdrtd_server.exceptions.InvalidParameter('server', 'duplicate')
-                else:
-                    raise fdrtd_server.exceptions.InternalServerError(str(err))
             except Exception as err:
                 self.storage[uuid]['busy'] = False
-                raise fdrtd_server.exceptions.InternalServerError(str(err))
+                raise helpers.handle_error(str(err), 'login')
         try:
             connection = r('connections%s <- DSI::datashield.login(%s)'
                            % (uuid.replace('-', ''), helpers.login_params_string_builder(parameters, uuid)))
-        except RRuntimeError as err:
-            self.storage[uuid]['busy'] = False
-            if 'The provided login details is missing both table and resource columns' in str(err):
-                raise fdrtd_server.exceptions.InvalidParameter('table, resource', 'both missing')
-            elif 'Unauthorized' in str(err):
-                raise fdrtd_server.exceptions.ApiError(401, 'Unauthorized')
-            else:
-                raise fdrtd_server.exceptions.InternalServerError(str(err))
         except Exception as err:
             self.storage[uuid]['busy'] = False
-            raise fdrtd_server.exceptions.InternalServerError(str(err))
+            raise helpers.handle_error(str(err), 'login')
         self.storage[uuid]['busy'] = False
         connection_microservice_uuid = self.bus.select_microservice(
             requirements={'protocol': 'DataSHIELD', 'microservice': 'connection'}

@@ -5,7 +5,6 @@ from threading import Thread
 import rpy2
 import rpy2.rinterface
 import rpy2.rinterface_lib
-# from rpy2.rinterface_lib.embedded import RRuntimeError
 from rpy2.robjects.packages import importr
 
 import fdrtd_server
@@ -150,11 +149,11 @@ class Connection(Microservice):
             self.storage[connection_uuid]['busy'] = False
             self.storage[connection_uuid]['calls'][call_uuid]['busy'] = False
             if 'datashield.errors' in str(err):
-                raise fdrtd_server.exceptions.InternalServerError(
-                    f'Error: \n {str(err)} \n datashield.errors(): \n {str(DSI.datashield_errors())}'
-                )
+                err_str = f'Error: \n {str(err)} \n datashield.errors(): \n {str(DSI.datashield_errors())}'
             else:
-                raise fdrtd_server.exceptions.InternalServerError(f'Error: \n{str(err)}')
+                err_str = f'Error: \n{str(err)}'
+            self.storage[connection_uuid]['calls'][call_uuid]['error'] = err_str
+            raise fdrtd_server.exceptions.InternalServerError(err_str)
 
     def logout(self, callback: dict):
         connection_uuid = callback['connection']
@@ -181,7 +180,6 @@ class Connection(Microservice):
             return_r = DSI.datashield_logout(connection)
             self.storage[connection_uuid]['calls'][call_uuid]['busy'] = False
             self.storage[connection_uuid]['busy'] = False
-            # del self.connections[callback['connection']]
             if isinstance(return_r, type(rpy2.rinterface.NULL)):
                 self.function_results_storage[connection_uuid][call_uuid] = None
             else:
@@ -190,15 +188,16 @@ class Connection(Microservice):
         except Exception as err:
             self.storage[connection_uuid]['calls'][call_uuid]['busy'] = False
             self.storage[connection_uuid]['busy'] = False
-            err_str = str(err)
             if 'datashield.errors' in str(err):
-                err_str += str(DSI.datashield_errors())
-            self.function_results_storage[connection_uuid][call_uuid] = {'error': err_str}
+                err_str = f'Error: \n {str(err)} \n datashield.errors(): \n {str(DSI.datashield_errors())}'
+            else:
+                err_str = f'Error: \n{str(err)}'
+            self.storage[connection_uuid]['calls'][call_uuid]['error'] = err_str
             raise fdrtd_server.exceptions.InternalServerError(err_str)
 
     def get_status(self, callback):
-        connection_uuid = callback['connection']
-        call_uuid = callback['call']
+        connection_uuid = callback.get('connection')
+        call_uuid = callback.get('call')
         try:
             return self.storage[connection_uuid]['calls'][call_uuid]
         except KeyError:
@@ -208,8 +207,8 @@ class Connection(Microservice):
                 raise fdrtd_server.exceptions.InvalidParameter(f'call {call_uuid}', 'not found')
 
     def get_result(self, callback):
-        connection_uuid = callback['connection']
-        call_uuid = callback['call']
+        connection_uuid = callback.get('connection')
+        call_uuid = callback.get('call')
         try:
             return self.function_results_storage[connection_uuid][call_uuid]
         except KeyError:

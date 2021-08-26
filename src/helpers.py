@@ -1,7 +1,10 @@
 import numpy as np
 import json
-from rpy2.robjects.packages import importr
+
 import rpy2
+from rpy2.robjects.packages import importr
+
+import fdrtd_server
 
 base = importr('base')
 DSI = importr('DSI')
@@ -9,6 +12,7 @@ dsBaseClient = importr('dsBaseClient')
 jsonlite_R = importr('jsonlite')
 
 types_dict = {'integer': int, 'double': float, 'character': str, 'complex': complex, 'logical': bool}
+
 
 def first_sweep(d):
     if isinstance(d, list):
@@ -116,6 +120,7 @@ def second_sweep(d):
 def r_to_json(output):
     return second_sweep(first_sweep(json.loads(jsonlite_R.serializeJSON(output)[0])))
 
+
 def defaults(func, parameters=None, **kwargs):
     if parameters is None:
         parameters = {}
@@ -138,6 +143,7 @@ def defaults(func, parameters=None, **kwargs):
             combined[key] = parameters[key]
     return combined
 
+
 def login_params_string_builder(parameters, uuid):
     r_params = 'logins=builder%s$build()' % uuid.replace('-', '')
     for key in parameters:
@@ -154,3 +160,19 @@ def login_params_string_builder(parameters, uuid):
             else:
                 r_params += f', variables="{parameters["variables"]}"'
     return r_params
+
+
+def handle_error(err, func):
+    if func == 'login':
+        if 'The server parameter cannot be empty' in err:
+            return fdrtd_server.exceptions.MissingParameter('server')
+        elif 'The url parameter cannot be empty' in err:
+            return fdrtd_server.exceptions.MissingParameter("url")
+        elif 'Duplicate server name: ' in err:
+            return fdrtd_server.exceptions.InvalidParameter('server', 'duplicate')
+        elif 'The provided login details is missing both table and resource columns' in err:
+            return fdrtd_server.exceptions.InvalidParameter('table, resource', 'both missing')
+        elif 'Unauthorized' in err:
+            return fdrtd_server.exceptions.ApiError(401, 'Unauthorized')
+        else:
+            return fdrtd_server.exceptions.InternalServerError(err)
