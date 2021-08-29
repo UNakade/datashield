@@ -7,9 +7,9 @@ import rpy2.rinterface_lib
 from rpy2.robjects.packages import importr
 from rpy2.robjects import r
 
-import fdrtd_server
-from fdrtd_server.microservice import Microservice
-from protocol_DataSHIELD.src import helpers
+import fdrtd.server
+from fdrtd.server.microservice import Microservice
+from fdrtd.protocol_DataSHIELD.src import helpers
 
 consolewrite_warnerror_backup = rpy2.rinterface_lib.callbacks.consolewrite_warnerror
 consolewrite_print_backup = rpy2.rinterface_lib.callbacks.consolewrite_print
@@ -69,10 +69,10 @@ class Login(Microservice):
         try:
             return self.storage[callback]
         except KeyError:
-            raise fdrtd_server.exceptions.InvalidParameter(f'uuid {callback}', 'not found')
+            raise fdrtd.server.exceptions.InvalidParameter(f'uuid {callback}', 'not found')
 
     def get_result(self, callback):
         try:
             return self.connection_callbacks_storage[callback]
         except KeyError:
-            fdrtd_server.exceptions.InvalidParameter(f'uuid {callback}', 'not found')
+            fdrtd.server.exceptions.InvalidParameter(f'uuid {callback}', 'not found')

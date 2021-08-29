@@ -18,13 +18,14 @@ The plugin is written in `Python` and uses the `rpy2` library.
 
 
 ### Installation:
-Installing and running `fdrtd_server` with `protocol_DataSHIELD` is very simple and takes only 4 commands:
+Installing and running `fdrtd_server` with `protocol_DataSHIELD` is very simple and takes only 3 commands:
 ```shell
-git clone https://github.com/fdrtd/server
-cd server
-git clone https://github.com/fdrtd/protocol_DataSHIELD
-python3 -m openapi_server -port:5000 
+git clone https://github.com/fdrtd/fdrtd
+git clone https://github.com/fdrtd/protocol_DataSHIELD ./fdrtd/protocol_DataSHIELD
+python -m fdrtd.webserver --port=5000 
 ```
 And that's all! You now have a `fdrtd_server` running on `http://localhost:5000`!
 
-For a detailed example on how to use the `protocol_DataSHIELD` plugin on the client side, please refer `protocol_DataSHIELD/examples/example.py`.
+Please note that the directory structure is important for the internal imports to work. The protocol_DataSHIELD repository should be cloned directly inside the fdrtd directory and the webserver should be started from the directory containing the fdrtd repository.  
+
+For a detailed example on how to use the `protocol_DataSHIELD` plugin on the client side, please refer to `protocol_DataSHIELD/examples/example.py`.

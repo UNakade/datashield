@@ -7,9 +7,9 @@ import rpy2.rinterface
 import rpy2.rinterface_lib
 from rpy2.robjects.packages import importr
 
-import fdrtd_server
-from fdrtd_server.microservice import Microservice
-from protocol_DataSHIELD.src import helpers
+import fdrtd.server
+from fdrtd.server.microservice import Microservice
+from fdrtd.protocol_DataSHIELD.src import helpers
 
 consolewrite_warnerror_backup = rpy2.rinterface_lib.callbacks.consolewrite_warnerror
 consolewrite_print_backup = rpy2.rinterface_lib.callbacks.consolewrite_print
@@ -94,10 +94,7 @@ class Connection(Microservice):
         connection = self.connections[connection_uuid]
         call = self.storage[connection_uuid]['calls'][call_uuid]
         if 'servers' in parameters:
-            if isinstance(parameters['servers'], list):
-                connection = connection.rx(base.c(*parameters['servers']))
-            else:
-                connection = connection.rx(parameters['servers'])
+            connection = helpers.extract_connections(connection, parameters['servers'])
         return_serial_json = parameters.get('return_serial_JSON', False)
         rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: call['warnerror'].append(e)
         rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: call['print'].append(e)
@@ -107,7 +104,7 @@ class Connection(Microservice):
         if func_ not in dir(dsBaseClient):
             self.storage[connection_uuid]['busy'] = False
             call['busy'] = False
-            raise fdrtd_server.exceptions.FunctionNotFound(f'{func} not in dsBaseClient')
+            raise fdrtd.server.exceptions.FunctionNotFound(f'{func} not in dsBaseClient')
         try:
             if func in self.return_types['plot']:
                 plot_uuid = str(_uuid.uuid4())
@@ -123,10 +120,7 @@ class Connection(Microservice):
                 return_dict = {'plot_uuid': plot_uuid}
                 self.storage[connection_uuid]['calls'][call_uuid]['plot_uuid'] = plot_uuid
                 if func in self.return_types['return']:
-                    if return_serial_json:
-                        return_dict['return_serial_json'] = jsonlite_R.serializeJSON(return_r)[0]
-                    else:
-                        return_dict['return_json'] = helpers.r_to_json(return_r)
+                    return_dict['return_json'] = helpers.r_to_json(return_r, return_serial_json)
                 self.storage[connection_uuid]['busy'] = False
                 self.storage[connection_uuid]['calls'][call_uuid]['busy'] = False
                 self.function_results_storage[connection_uuid][call_uuid] = return_dict
@@ -136,13 +130,9 @@ class Connection(Microservice):
                 self.storage[connection_uuid]['busy'] = False
                 self.storage[connection_uuid]['calls'][call_uuid]['busy'] = False
                 if func in self.return_types['return']:
-                    if return_serial_json:
-                        self.function_results_storage[connection_uuid][call_uuid] = jsonlite_R.serializeJSON(
-                            return_r)[0]
-                        return None
-                    else:
-                        self.function_results_storage[connection_uuid][call_uuid] = helpers.r_to_json(return_r)
-                        return None
+                    self.function_results_storage[connection_uuid][call_uuid] = helpers.r_to_json(return_r,
+                                                                                                  return_serial_json)
+                    return None
                 self.function_results_storage[connection_uuid][call_uuid] = None
                 return None
         except Exception as err:
@@ -153,7 +143,7 @@ class Connection(Microservice):
             else:
                 err_str = f'Error: \n{str(err)}'
             self.storage[connection_uuid]['calls'][call_uuid]['error'] = err_str
-            raise fdrtd_server.exceptions.InternalServerError(err_str)
+            raise fdrtd.server.exceptions.InternalServerError(err_str)
 
     def logout(self, callback: dict):
         connection_uuid = callback['connection']
@@ -183,7 +173,7 @@ class Connection(Microservice):
             if isinstance(return_r, type(rpy2.rinterface.NULL)):
                 self.function_results_storage[connection_uuid][call_uuid] = None
             else:
-                self.function_results_storage[connection_uuid][call_uuid] = helpers.r_to_json(return_r)
+                self.function_results_storage[connection_uuid][call_uuid] = helpers.r_to_json(return_r, False)
             return None
         except Exception as err:
             self.storage[connection_uuid]['calls'][call_uuid]['busy'] = False
@@ -193,7 +183,7 @@ class Connection(Microservice):
             else:
                 err_str = f'Error: \n{str(err)}'
             self.storage[connection_uuid]['calls'][call_uuid]['error'] = err_str
-            raise fdrtd_server.exceptions.InternalServerError(err_str)
+            raise fdrtd.server.exceptions.InternalServerError(err_str)
 
     def get_status(self, callback):
         connection_uuid = callback.get('connection')
@@ -202,9 +192,9 @@ class Connection(Microservice):
             return self.storage[connection_uuid]['calls'][call_uuid]
         except KeyError:
             if connection_uuid not in self.storage:
-                raise fdrtd_server.exceptions.InvalidParameter(f'connection {connection_uuid}', 'not found')
+                raise fdrtd.server.exceptions.MissingParameter(f'connection {connection_uuid}')
             else:
-                raise fdrtd_server.exceptions.InvalidParameter(f'call {call_uuid}', 'not found')
+                raise fdrtd.server.exceptions.MissingParameter(f'call {call_uuid}')
 
     def get_result(self, callback):
         connection_uuid = callback.get('connection')
@@ -213,6 +203,6 @@ class Connection(Microservice):
             return self.function_results_storage[connection_uuid][call_uuid]
         except KeyError:
             if connection_uuid not in self.function_results_storage:
-                raise fdrtd_server.exceptions.InvalidParameter(f'connection {connection_uuid}', 'not found')
+                raise fdrtd.server.exceptions.MissingParameter(f'connection {connection_uuid}')
             else:
-                raise fdrtd_server.exceptions.InvalidParameter(f'call {call_uuid}', 'not found')
+                raise fdrtd.server.exceptions.MissingParameter(f'call {call_uuid}')

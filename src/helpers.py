@@ -4,7 +4,7 @@ import json
 import rpy2
 from rpy2.robjects.packages import importr
 
-import fdrtd_server
+import fdrtd.server
 
 base = importr('base')
 DSI = importr('DSI')
@@ -117,8 +117,11 @@ def second_sweep(d):
             return d
 
 
-def r_to_json(output):
-    return second_sweep(first_sweep(json.loads(jsonlite_R.serializeJSON(output)[0])))
+def r_to_json(output, return_serial_json):
+    if return_serial_json:
+        return jsonlite_R.serializeJSON(output)[0]
+    else:
+        return second_sweep(first_sweep(json.loads(jsonlite_R.serializeJSON(output)[0])))
 
 
 def defaults(func, parameters=None, **kwargs):
@@ -165,14 +168,22 @@ def login_params_string_builder(parameters, uuid):
 def handle_error(err, func):
     if func == 'login':
         if 'The server parameter cannot be empty' in err:
-            return fdrtd_server.exceptions.MissingParameter('server')
+            return fdrtd.server.exceptions.MissingParameter('server')
         elif 'The url parameter cannot be empty' in err:
-            return fdrtd_server.exceptions.MissingParameter("url")
+            return fdrtd.server.exceptions.MissingParameter("url")
         elif 'Duplicate server name: ' in err:
-            return fdrtd_server.exceptions.InvalidParameter('server', 'duplicate')
+            return fdrtd.server.exceptions.InvalidParameter('server', 'duplicate')
         elif 'The provided login details is missing both table and resource columns' in err:
-            return fdrtd_server.exceptions.InvalidParameter('table, resource', 'both missing')
+            return fdrtd.server.exceptions.InvalidParameter('table, resource', 'both missing')
         elif 'Unauthorized' in err:
-            return fdrtd_server.exceptions.ApiError(401, 'Unauthorized')
+            return fdrtd.server.exceptions.ApiError(401, 'Unauthorized')
         else:
-            return fdrtd_server.exceptions.InternalServerError(err)
+            return fdrtd.server.exceptions.InternalServerError(err)
+
+
+def extract_connections(connections, parameters_servers):
+    if isinstance(parameters_servers, list):
+        connection = connections.rx(base.c(*parameters_servers))
+    else:
+        connection = connections.rx(parameters_servers)
+    return connection

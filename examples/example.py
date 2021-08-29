@@ -1,13 +1,13 @@
-# This example assumes that the fdrtd_server is running on http://localhost:5000
-# which is very easy to do, just follow these 4 steps:
-# git clone https://github.com/fdrtd/server
-# cd server
-# git clone https://github.com/fdrtd/protocol_DataSHIELD
-# python3 -m openapi_server -port:5000
+# This example assumes that the fdrtd webserver is running on http://localhost:5000
+# which is very easy to do, just follow these 3 steps:
+# git clone https://github.com/fdrtd/fdrtd
+# git clone https://github.com/fdrtd/protocol_DataSHIELD ./fdrtd/protocol_DataSHIELD
+# python -m fdrtd.webserver --port=5000
 
 # Now on the client side:
 # Initializing the fdrtd api:
-import fdrtd
+import fdrtd # this is different from the fdrtd repository cloned above.
+# It refers to the client-side fdrtd library to be installed using "pip install fdrtd"
 interface = fdrtd.HttpInterface("http://localhost:5000")  # insert appropriate server url here
 api = fdrtd.Api(interface)
 
