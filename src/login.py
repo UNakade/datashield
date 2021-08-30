@@ -9,7 +9,7 @@ from rpy2.robjects import r
 
 import fdrtd.server
 from fdrtd.server.microservice import Microservice
-from fdrtd.protocol_DataSHIELD.src import helpers
+from fdrtd.plugins.protocol_DataSHIELD.src import helpers
 
 consolewrite_warnerror_backup = rpy2.rinterface_lib.callbacks.consolewrite_warnerror
 consolewrite_print_backup = rpy2.rinterface_lib.callbacks.consolewrite_print
