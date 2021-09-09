@@ -7,7 +7,9 @@
 # Now on the client side:
 # Initializing the fdrtd api:
 import fdrtd # this is different from the fdrtd repository cloned above.
-# It refers to the client-side fdrtd library to be installed using "pip install fdrtd"
+# It refers to the client-side fdrtd library to be installed using "pip install fdrtd".
+# IMPORTANT: the client side library should be installed in a separate virtual environment.
+# Otherwise, it will conflict with the fdrtd server repository mentioned above.
 interface = fdrtd.HttpInterface("http://localhost:5000")  # insert appropriate server url here
 api = fdrtd.Api(interface)
 

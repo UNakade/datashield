@@ -1,6 +1,8 @@
 import functools
 import uuid as _uuid
 from threading import Thread
+import importlib.util
+from pathlib import Path
 
 import rpy2
 import rpy2.rinterface
@@ -9,7 +11,12 @@ from rpy2.robjects.packages import importr
 
 import fdrtd.server
 from fdrtd.server.microservice import Microservice
-from fdrtd.plugins.protocol_DataSHIELD.src import helpers
+try:
+    from fdrtd.plugins.protocol_DataSHIELD.src import helpers
+except ImportError:
+    spec_helpers = importlib.util.spec_from_file_location('helpers', Path(__file__).resolve().parent / 'helpers.py')
+    helpers = importlib.util.module_from_spec(spec_helpers)
+    spec_helpers.loader.exec_module(helpers)
 
 consolewrite_warnerror_backup = rpy2.rinterface_lib.callbacks.consolewrite_warnerror
 consolewrite_print_backup = rpy2.rinterface_lib.callbacks.consolewrite_print
@@ -29,6 +36,7 @@ class Connection(Microservice):
         super().__init__(bus, endpoint)
 
         self.connections = {}
+        self.connections_default = {}
         self.storage = {}
         self.function_results_storage = {}
         self.deprecated = {
@@ -48,16 +56,18 @@ class Connection(Microservice):
         self.input_type_requirements = {
             'x_vec': ['ds.vectorCalc']
         }
+        self.implemented_DSI = ['datashield.errors', 'datashield.workspaces', 'datashield.workspace_save',
+                                'datashield.workspace_rm']
 
     def make_public(self):
         functions_dict = {}
-        funcnames = list(base.ls('package:dsBaseClient'))
-        for func in funcnames:
+        for func in list(base.ls('package:dsBaseClient')):
             functions_dict[func[3:].replace('.', '_')] = functools.partial(self.call_function, func=func)
         return functions_dict
 
     def connect(self, connection, uuid):
         self.connections[uuid] = connection
+        self.connections_default[uuid] = connection
         self.storage[uuid] = {
             'warnerror': [],
             'print': [],
@@ -84,7 +94,10 @@ class Connection(Microservice):
             'print': [],
             'busy': True
         }
-        Thread(target=self.call_function_helper, args=(callback, func, parameters), daemon=True).start()
+        if func.replace('.', '_') in dir(dsBaseClient):
+            Thread(target=self.call_function_helper, args=(callback, func, parameters), daemon=True).start()
+        elif func.replace('.', '_') in dir(DSI):
+            Thread(target=self.call_function_DSI_helper, args=(callback, func, parameters), daemon=True).start()
         return self.callback(callback)
 
     def call_function_helper(self, callback: dict, func: str, parameters: dict):
@@ -95,6 +108,8 @@ class Connection(Microservice):
         call = self.storage[connection_uuid]['calls'][call_uuid]
         if 'servers' in parameters:
             connection = helpers.extract_connections(connection, parameters['servers'])
+        else:
+            connection = self.connections_default[connection_uuid]
         return_serial_json = parameters.get('return_serial_JSON', False)
         rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: call['warnerror'].append(e)
         rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: call['print'].append(e)
@@ -144,6 +159,68 @@ class Connection(Microservice):
                 err_str = f'Error: \n{str(err)}'
             self.storage[connection_uuid]['calls'][call_uuid]['error'] = err_str
             raise fdrtd.server.exceptions.InternalServerError(err_str)
+
+    def call_function_DSI_helper(self, callback, func, parameters):
+        func_ = func.replace('.', '_')
+        connection_uuid = callback['connection']
+        call_uuid = callback['call']
+        connection = self.connections[connection_uuid]
+        call = self.storage[connection_uuid]['calls'][call_uuid]
+        if 'servers' in parameters:
+            connection = helpers.extract_connections(connection, parameters['servers'])
+        else:
+            connection = self.connections_default[connection_uuid]
+        return_serial_json = parameters.get('return_serial_JSON', False)
+        rpy2.rinterface_lib.callbacks.consolewrite_warnerror = lambda e: call['warnerror'].append(e)
+        rpy2.rinterface_lib.callbacks.consolewrite_print = lambda e: call['print'].append(e)
+        parameters_used = helpers.defaults(getattr(DSI, func_), parameters)
+        if 'conns' in parameters_used:
+            parameters_used['conns'] = connection
+        elif 'conn' in parameters_used:
+            parameters_used['conn'] = connection
+        if func not in self.implemented_DSI:
+            self.storage[connection_uuid]['busy'] = False
+            call['busy'] = False
+            raise fdrtd.server.exceptions.FunctionNotFound(f'{func} not implemented')
+        try:
+            return_r = getattr(dsBaseClient, func_)(**parameters_used)
+            self.storage[connection_uuid]['busy'] = False
+            self.storage[connection_uuid]['calls'][call_uuid]['busy'] = False
+            if func in self.return_types['return']:
+                self.function_results_storage[connection_uuid][call_uuid] = helpers.r_to_json(return_r,
+                                                                                              return_serial_json)
+                return None
+            self.function_results_storage[connection_uuid][call_uuid] = None
+            return None
+        except Exception as err:
+            self.storage[connection_uuid]['busy'] = False
+            self.storage[connection_uuid]['calls'][call_uuid]['busy'] = False
+            if 'datashield.errors' in str(err):
+                err_str = f'Error: \n {str(err)} \n datashield.errors(): \n {str(DSI.datashield_errors())}'
+            else:
+                err_str = f'Error: \n{str(err)}'
+            self.storage[connection_uuid]['calls'][call_uuid]['error'] = err_str
+            raise fdrtd.server.exceptions.InternalServerError(err_str)
+
+    def default_connections(self, callback, servers):
+        connection_uuid = callback['connection']
+        try:
+            if isinstance(servers, list):
+                self.connections_default[connection_uuid] = self.connections[connection_uuid].rx(base.c(*servers))
+            else:
+                self.connections_default[connection_uuid] = self.connections[connection_uuid].rx(base.c(servers))
+        except Exception as err:
+            raise fdrtd.server.exceptions.InternalServerError(str(err))
+
+    def list_connections(self, callback):
+        return helpers.r_to_json(self.connections[callback['connection']], False)
+
+    @staticmethod
+    def datashield_errors():
+        return str(DSI.datashield_errors())
+
+    def datashield_workspaces(self, callback):
+        return helpers.r_to_json(DSI.datashield_workspaces(conns = self.connections[callback['connection']]), False)
 
     def logout(self, callback: dict):
         connection_uuid = callback['connection']

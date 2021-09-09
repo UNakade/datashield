@@ -30,7 +30,10 @@
         "call_function",
         "logout",
         "get_status",
-        "get_result"
+        "get_result",
+        "default_connections",
+        "list_connections",
+        "datashield_errors"
       ]
     }
   ]
