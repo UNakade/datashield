@@ -1,0 +1,660 @@
+---
+title: "Structure of protocol_DataSHIELD"
+author: "Uday Nakade"
+date: "10/1/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(eval = FALSE)
+```
+
+## How `DataSHIELD` works
+`DataSHIELD` is a framework for allowing data scientists to run computations on hospital data without compromising the privacy of individual patients. The structure of `DataSHIELD` involves a set of one or more servers and a single data scientist (client) who performs computations. The data administrators on the server side can control how fine of an access is to be provided to the client (for example, if the client requests a histogram with sufficiently thin bins, he could learn where each data point lies with arbitrary precision. In order to avoid this, the data administrators can choose not to reveal the data in a bin if the number of elements in it is below a certain threshold. In order to avoid letting the client find out which bin has a number of elements lower than the threshold, the bin edges are randomized before reporting the data. `DataSHIELD` also has some important limitations. For example, say the data scientist wants to know the average of a list of numbers, parts of which are stored by each of the servers. `DataSHIELD` returns the averages and numbers of elements on each of the servers and the data scientist compiles them all into a global average. Hence, more information is revealed to the data scientist than was required. It's possible to avoid this using `fdrtd` with some of the other plugins that implement secure multi-party computation algorithms. 
+
+On the client side, `DataSHIELD` has two main libraries, `dsBaseClient` and `DSI`. `dsBaseClient` contains most of the computational functions. DSI is like a communication interface between `dsBaseClient` and the `DataSHIELD` servers. `DSI` is used to login and logout from the servers, assign variables on the server side, retrieve data from the server, etc. This means that `DSI` has a lot of base level functions which can be used by advanced users to go up to and beyond what `dsBaseClient` is capable of.
+
+Most of the output produced by `DataSHIELD` is printed to the `R` console. Even the value returned by a function call is meant to be directly printed to the console. This is how the writers of `DataSHIELD` wanted it to be used instead of assigning the returned value to a variable. For example, if you run the command `quantile_mean_LAB_HDL <- dsBaseClient::ds.quantileMean(x='D$LAB_HDL')`, the output to the console will show a progressbar and after it ends, an awkward last line will be printed to the console: `Quantiles of the pooled data:`, as if the function was meant to show you more. If you had instead run `dsBaseClient::ds.quantileMean(x='D$LAB_HDL')` an actual list of the quantile means would have been printed. This is why handling the console output of `DataSHIELD` is very important if we want to create a `Python` wrapper for `DataSHIELD`. 
+
+## How the `rpy2` library works
+`protocol_DataSHIELD` is written in `Python` using the `rpy2` library. `rpy2` runs an instance of R in the background and acts as an interface between R and `Python`. It defines many `Python` object types corresponding to the typical R data types. It can load R packages and create corresponding `Python` modules, so that calling a function from the module will call the R function in the background. It also takes care of converting the arguments given to the `Python` function to data types required by R (not always). 
+
+An important point to note is that the `.` character has a special meaning in `Python` whereas it can be freely used in variable names in R. Hence, when a function in R has a name that contains a `.`, it's changed to an `_` when the `Python` module is created.
+
+Since handling console output of DataSHIELD is important, let's see how it can be done using `rpy2`. There is a submodule `rpy2.rinterface_lib.callbacks` which contains two functions that are important for us, `consolewrite_warnerror` and `consolewrite_print`. warnerror is used when a function is ongoing and is producing progressbars or status messages. print is used when an actual print command is called in R or a function finishes and the return value is to be shown on the console. If we define our own warnerror and print functions, we can handle these messages however we want, like storing to an array. 
+
+## Example in R
+
+Let's first ensure that the required packages are installed
+
+```{r}
+# R
+require(DSI)
+require(DSOpal)
+require(dsBaseClient)
+```
+
+Assuming that the virtual machine with the Opal server is available at "<http://192.168.56.100:8080/>", here's how we login:
+
+```{r}
+# R
+library('DSI')
+library('DSOpal')
+library('dsBaseClient')
+
+builder <- DSI::newDSLoginBuilder()
+# The builder here is an 'environment' variable, which is like a Python 
+# dictionary. It can store variables against labels which can then be 
+# retrieved by using the $ tag like so: environment$key.
+
+# In the following, append is a function in the environment builder. This 
+# function merely adds the server specification to a list, after a few basic 
+# checks
+builder$append(server = "study1", url = "http://192.168.56.100:8080/", 
+               user = "administrator", password = "datashield_test&", 
+               table = "CNSIM.CNSIM1", driver = "OpalDriver")
+builder$append(server = "study2", url = "http://192.168.56.100:8080/", 
+               user = "administrator", password = "datashield_test&", 
+               table = "CNSIM.CNSIM2", driver = "OpalDriver")
+builder$append(server = "study3", url = "http://192.168.56.100:8080/", 
+               user = "administrator", password = "datashield_test&", 
+               table = "CNSIM.CNSIM3", driver = "OpalDriver")
+
+#builder$build() will finalize and return that list
+logindata <- builder$build()
+
+#here is where the logging in takes place:
+connections <- DSI::datashield.login(logins = logindata, assign = TRUE, 
+                                     symbol = "D")
+
+```
+
+This is how we need to change this in `Python`:
+
+```{python}
+# Python
+from rpy2.robjects.packages import importr
+
+DSI = importr('DSI') # loads the 'DSI' package in the background R process and 
+                     # creates a module in Python named DSI, from which, 
+                     # we can call R functions
+
+DSOpal = importr('DSOpal') # it's important to load DSOpal because DSI alone is 
+                           # like a struct or forward declaration, the functions 
+                           # in which are implemented by an interface specific 
+                           # library, like DSOpal for an Opal driver
+
+builder = DSI.newDSLoginBuilder()
+builder['append'](server = "study1", url = "http://192.168.56.100:8080/", 
+                  user = "administrator", password = "datashield_test&", 
+                  table = "CNSIM.CNSIM1", driver = "OpalDriver")
+builder['append'](server = "study2", url = "http://192.168.56.100:8080/", 
+                  user = "administrator", password = "datashield_test&", 
+                  table = "CNSIM.CNSIM2", driver = "OpalDriver")
+builder['append'](server = "study3", url = "http://192.168.56.100:8080/", 
+                  user = "administrator", password = "datashield_test&", 
+                  table = "CNSIM.CNSIM3", driver = "OpalDriver")
+
+logindata = builder['build']()
+
+connections = DSI.datashield_login(logins = logindata, assign = True, 
+                                    symbol = "D") 
+# note the '_' in 'datashield_login' in place of the '.'. This happened because 
+# a '.' is allowed in variable names in R but not in Python.
+
+# note that in the actual protocol_DataSHIELD code, I have tried to generate R 
+# code strings and directly run them in the background R process to log in 
+# because one dsBaseClient function did not run this way, but most others do.
+
+# in order to directly run an R code string, we need to do the following:
+from rpy2.robjects import r
+x_py = r('x_r <- "2"') 
+# please be careful with the single and double quotes. 
+# interestingly, if a command which assigns a value to a variable or returns 
+# something is run in R this way, the r function used here returns the value, 
+# which is why we could assign it to the python variable x_py. type(x_py) will 
+# not be a string, it will be of the class 'rpy2.robjects.vectors.StrVector' 
+# (in R, most things are vectors)
+
+```
+
+This works, but the console output will look very ugly. In order to make it prettier, we can do the following before running the code above:
+```{python}
+# Python
+import rpy2, rpy2.rinterface, rpy2.rinterface_lib
+import sys
+
+# taking backups of the default functions that write stuff to the console:
+consolewrite_warnerror_backup = \
+rpy2.rinterface_lib.callbacks.consolewrite_warnerror
+consolewrite_print_backup     = \
+rpy2.rinterface_lib.callbacks.consolewrite_print
+
+# now redefining them:
+rpy2.rinterface_lib.callbacks.consolewrite_warnerror = sys.stdout.write
+rpy2.rinterface_lib.callbacks.consolewrite_print     = sys.stdout.write
+
+# If instead of writing these outputs to the console, we want to store them to 
+# an array:
+warnerror_array = []
+print_array = []
+
+rpy2.rinterface_lib.callbacks.consolewrite_warnerror = \
+lambda message: warnerror_array.append(message)
+rpy2.rinterface_lib.callbacks.consolewrite_print     = \
+lambda message: print_array.append(message)
+
+# It's of course easier to use a mutable variable to store these instead of an 
+# immutable one
+```
+
+Let's now call some DataSHIELD functions from Python.
+
+```{python}
+# Python
+dsBaseClient = importr('dsBaseClient')
+
+dsBaseClient.ds_quantileMean(x = 'D$LAB_HDL', datasources = connections) 
+# note that the 'datasources' argument cannot be left empty. It could be empty 
+# in R, but not via rpy2.
+# If the function returns anything, it will be an object of a class defined by 
+# rpy2. I'll talk about converting them to JSON later on in this document.
+```
+
+## protocol_DataSHIELD
+
+Now that the basics are out of the way, we can start talking about protocol_DataSHIELD. 
+
+### Login microservice
+
+```{python}
+# The Login microservice has two dictionaries: storage and 
+# connection_callbacks_storage.
+# This is the login function, stripped of all error handling:
+def login(self, list_of_servers, parameters=None, **kwargs):
+    if parameters is None:
+        parameters = {}
+    parameters.update(kwargs) # so parameters to be passed to the 
+    # DSI::datashield.login function can either be given as a dictionary or as 
+    # kwargs, both are being combined here anyways.
+    uuid = str(_uuid.uuid4()) # This uuid will be carried over to the Connection
+    # microservice after logging in
+    self.storage[uuid] = {'warnerror': [], 'print': [], 'busy': True} # This
+    #  will be common throughout Login and Connection. Whenever a function is 
+    # called, a uuid is generated and the storage starts holding a dictionary 
+    # with warnerror, print and busy (or more things). Any subsequent console 
+    # output generated by R will be appended to either the warnerror or print 
+    # arrays (the function called by the next thread will ensure that). 
+    # when the client calls a get_status function on the login_callback, this 
+    # dictionary is returned
+    Thread(target=self.login_helper, args=(uuid, list_of_servers, parameters), 
+           daemon=True).start() # A new daemon thread is started immediately so 
+    # that we can return a callback object to the client immediately, so that he
+    # may start querying for the progressbar. 
+    return self.callback(uuid)
+
+# This is the login_helper function:
+def login_helper(self, uuid, list_of_servers, parameters):
+    rpy2.rinterface_lib.callbacks.consolewrite_warnerror = \
+    lambda e: self.storage[uuid]['warnerror'].append(e) # start storing the 
+    # console output to the respective arrays
+    rpy2.rinterface_lib.callbacks.consolewrite_print = \
+    lambda e: self.storage[uuid]['print'].append(e)
+    builder = r('builder%s <- DSI::newDSLoginBuilder()' % uuid.replace('-', ''))
+    # This is just another way of creating the builder by directly running the 
+    # command in R
+    for server in list_of_servers:
+        builder['append'](**server) # This requires the list_of_servers to be a 
+        # list of kwargs dictionaries
+    connection = r('connections%s <- DSI::datashield.login(%s)'
+                   % (uuid.replace('-', ''), 
+                      helpers.login_params_string_builder(parameters, uuid)))
+    connection_microservice_uuid = self.bus.select_microservice(
+        requirements={'protocol': 'DataSHIELD', 'microservice': 'connection'}
+    ) # on the fdrtd server side, bus.select_microservice returns a string, the 
+    # uuid of the microservice. this is the same as the handle of the 
+    # microservice the client can see
+    self.connection_callbacks_storage[uuid] = self.bus.call_microservice(
+        handle=connection_microservice_uuid,
+        function='connect',
+        parameters={'connection': connection, 'uuid': uuid}
+    ) # connection_callbacks_storage stores the callback to the Connection 
+    # microservice, to be returned to the client when he calls get_result on the
+    # login callback
+    self.storage[uuid]['busy'] = False
+    return None
+```
+
+### Connection microservice
+
+Now let's look at the Connection microservice
+
+```{python}
+# In the Connection microservice, the most important dictionaries are 
+# connections, storage and function_results_storage.
+# This is the connect function which was called by the login_helper function:
+def connect(self, connection, uuid):
+    self.connections[uuid] = connection
+    self.storage[uuid] = {
+        'warnerror': [],
+        'print': [],
+        'busy': False,
+        'path_to_temp_plot_storage': '',
+        'calls': {}
+    } # Here, storage['path_to_temp_plot_storage'] is the local directory on the
+      # server side where plots are to be stored before they are sent to the
+      # client. 
+      # storage['calls'] is also an important dictionary. I'll mention it in 
+      # more details later when we see how the Connection microservice handles
+      # DataSHIELD function calls.
+    self.function_results_storage[uuid] = {} # This will store values returned 
+                                             # by DataSHIELD function calls, to
+                                             # be reported to the client when he
+                                             # calls 'get_result'
+    rpy2.rinterface_lib.callbacks.consolewrite_warnerror = \
+    lambda e: self.storage[uuid]['warnerror'].append(e)
+    rpy2.rinterface_lib.callbacks.consolewrite_print = \
+    lambda e: self.storage[uuid]['print'].append(e) # These store console output
+                                                    # after logging in and 
+                                                    # before any DataSHIELD
+                                                    # function is called
+    return self.callback({'connection': uuid}) # This is returned to the client 
+                                               # when he calls get_result on a 
+                                               # login_callback
+
+# Next, we have the call_function and the call_function_helper functions:
+def call_function(self, callback, func, parameters, **kwargs):
+    connection_uuid = callback['connection']
+    if parameters is None:
+        parameters = {}
+    parameters.update(kwargs)
+    call_uuid = str(_uuid.uuid4()) # A new uuid is generated every time a 
+                                   # function is called. Note the variable name
+    callback.update({'call': call_uuid}) # The callback will now contain a 
+                                         # reference to the latest function 
+                                         # called. The client can choose to keep
+                                         # this function_callback separate from 
+                                         # the connection_callback returned 
+                                         # earlier
+    self.storage[connection_uuid]['busy'] = True # The connection will be busy 
+                                                 # while the function is running
+    self.storage[connection_uuid]['calls'][call_uuid] = {
+        'function': func, # this is the function name
+        'warnerror': [],
+        'print': [],
+        'busy': True
+    } # Note the location where this dictionary is stored
+    Thread(target=self.call_function_helper, args=(callback, func, parameters), 
+           daemon=True).start()
+    return self.callback(callback)
+
+# The call_function_helper function, stripped of all error handling:
+def call_function_helper(self, callback: dict, func: str, parameters: dict):
+    func_ = func.replace('.', '_') # dots are changed to underscores by rpy2
+    connection_uuid = callback['connection']
+    call_uuid = callback['call']
+    connection = self.connections[connection_uuid]
+    call = self.storage[connection_uuid]['calls'][call_uuid]
+    if 'servers' in parameters:
+        connection = helpers.extract_connections(connection, 
+                                                 parameters['servers'])
+                                                 # Sometimes the client might 
+                                                 # want to only include a subset
+                                                 # of the servers available to
+                                                 # him in a calculation. This 
+                                                 # takes care of that. 
+                                                 # parameters['servers'] should 
+                                                 # either be an integer index of
+                                                 # the desired server or a list
+                                                 # of indices (R style indices,
+                                                 # which begin with 1 instead
+                                                 # of 0)
+    return_serial_json = parameters.get('return_serial_JSON', False)
+    # JSON will be covered later
+    rpy2.rinterface_lib.callbacks.consolewrite_warnerror = \
+    lambda e: call['warnerror'].append(e)
+    rpy2.rinterface_lib.callbacks.consolewrite_print = \
+    lambda e: call['print'].append(e)
+    parameters_used = helpers.defaults(getattr(dsBaseClient, func_), parameters)
+    # Every function in R can tell you a list of variables it expects, along 
+    # with any default values. Just enter "formals(function)" in R or 
+    # function.formals() in python/rpy2. helpers.defaults gets this list, 
+    # ignores any other kwargs provided by the client, replaces missing 
+    # variables by their default values, and prepares the variables to be passed
+    # to the rpy2 function
+    if 'datasources' in parameters_used:
+        parameters_used['datasources'] = connection # The client cannot provide 
+                                                    # the datasources argument 
+                                                    # because it's an rpy2 
+                                                    # object which is never sent
+                                                    # to the user, only a 
+                                                    # connection_uuid is sent, 
+                                                    # hence, we have to provide 
+                                                    # it ourselves otherwise, 
+                                                    # the default value "NULL" 
+                                                    # will be sent to R
+    if func not in self.return_types['plot']: # Order of if-else changed 
+                                              # compared to the original code to
+                                              # make it easier to understand
+        return_r = getattr(dsBaseClient, func_)(**parameters_used) # actual 
+                                                                   # value
+                                                                   # returned
+                                                                   # by the 
+                                                                   # function
+        self.storage[connection_uuid]['busy'] = False
+        self.storage[connection_uuid]['calls'][call_uuid]['busy'] = False
+        if func in self.return_types['return']:
+            self.function_results_storage[connection_uuid][call_uuid] = \
+            helpers.r_to_json(return_r, return_serial_json)
+            return None
+        self.function_results_storage[connection_uuid][call_uuid] = None
+        return None
+    else:
+        plot_uuid = str(_uuid.uuid4())
+        aspect_mul = 1 # Sometimes, an individual plot is separately created for
+                       # each server and they are placed next to each other. If
+                       # the aspect ratio of the full image were 1, the 
+                       # individual plots would be stretched out
+        if (parameters_used['type']    == 'split') | \
+           (parameters_used['type'][0] == 'split'):
+            aspect_mul = len(connection) # Only change aspect ratio if plots 
+                                         # from each server are separated
+        grDevices.png(
+            filename=self.storage[connection_uuid]['path_to_temp_plot_storage']\
+            + plot_uuid + '.png', height=10, width=aspect_mul * 10, units='in', 
+            res=300
+        ) # A display device needs to be specified in R before calling a 
+          # function that would generate a plot. The default device is a 
+          # separate window, but we need the device to be an image file.
+          # We could let the client provide us these parameters in the future
+        return_r = getattr(dsBaseClient, func_)(**parameters_used)
+        grDevices.dev_off() # This closes the png display device and saves the 
+                            # plot to the image
+        return_dict = {'plot_uuid': plot_uuid}
+        self.storage[connection_uuid]['calls'][call_uuid]['plot_uuid'] = \
+                                                                       plot_uuid
+        if func in self.return_types['return']:
+            return_dict['return_json'] = helpers.r_to_json(return_r, 
+                                                           return_serial_json)
+        self.storage[connection_uuid]['busy'] = False
+        self.storage[connection_uuid]['calls'][call_uuid]['busy'] = False
+        self.function_results_storage[connection_uuid][call_uuid] = return_dict
+        # So the dictionary that will be returned to the client when he calls
+        # get_result will contain the plot_uuid and a jsonified version of the 
+        # function return value
+        return None
+
+# There are other variables in the Connection microservice, namely, deprecated
+# (list of deprecated functions in dsBaseClient), return_types (list of
+# functions that either return some value or generate plots) and 
+# input_type_requirements (in some functions, an input variable needs to have a 
+# certain class. For example, in ds.vectorCalc, the x variable cannot be a 
+# single number, it must be converted to a vector first. This needs to be 
+# explored further for other functions.)
+```
+
+### helpers
+With most of the Login and Connection classes explained, we can now move on to helpers. The most important thing here is the R to json conversion.
+
+```{r, eval=TRUE}
+# R
+
+# In R, a lot of important properties of objects are stored along with the 
+# object as attributes. For example, matrices in R can have row and column 
+# names. There is a library in R which can convert objects to and from json, 
+# called jsonlite. For example:
+
+m <- matrix(c(1,2,3,4), nrow=2, ncol=2, dimnames=list(c('a', 'b'), c('c', 'd')))
+print(m)
+
+library('jsonlite')
+m_json <- jsonlite::toJSON(m)
+print(m_json)
+
+print(jsonlite::fromJSON(m_json))
+
+# As you can see, the row and column names were lost by the function toJSON
+
+# There is another function which tries to preserve as much information as 
+# possible, called serializeJSON. For example:
+
+m_serial_json <- jsonlite::serializeJSON(m)
+print(jsonlite::prettify(m_serial_json, indent=2))
+
+# That looks ugly! But it preserves most of the data. Next step is to convert 
+# this to a usable and readable format.
+```
+
+```{python, eval=TRUE}
+# Python
+
+m_serial_json = '{"type":"double","attributes":{"dim":{"type":"integer",\
+                  "attributes":{},"value":[2,2]},"dimnames":{"type":"list",\
+                  "attributes":{},"value":[{"type":"character","attributes":{},\
+                  "value":["a","b"]},{"type":"character","attributes":{},\
+                  "value":["c","d"]}]}},"value":[1,2,3,4]}'
+import json
+# The r_to_json function from helpers:
+def r_to_json(output, return_serial_json):
+    # If the client runs the inverse function, 'unserializeJSON' on this json 
+    # string, he will get back the original matrix. He can do this if he is 
+    # using R. In that case, he can provide a boolean kwarg called 
+    # 'return_serial_JSON' when calling the original function and we would send 
+    # him this json string as it is.
+    if return_serial_json:
+        return jsonlite_R.serializeJSON(output)[0]
+    # But if the client is not using R, we will first convert this to a better 
+    # format.
+    else:
+        return second_sweep(
+                first_sweep(
+                    json.loads(jsonlite_R.serializeJSON(output)[0])
+                    )
+                )
+
+# Let's first convert it back directly as if it were a normal json string and 
+# see the structure in it. 
+
+m_serial_json_loads = json.loads(m_serial_json)
+
+print(m_serial_json_loads.keys())
+# We get a dictionary with three keys: type, attributes and value.
+
+print(m_serial_json_loads['attributes'].keys())
+# There are two attributes, dim (dimensions) and dimnames
+
+print(m_serial_json_loads['attributes']['dim'].keys())
+# Each of those attributes has its own type, attributes and value
+print(m_serial_json_loads['attributes']['dimnames'].keys())
+
+print(m_serial_json_loads['attributes']['dim'])
+# But 'attributes' in dim and dimanmes is an empty dictionary
+
+```
+
+```{python}
+# So dim only has a type = integer and a value = [2, 2]. 
+# There are 5 basic data types in R. Here are the corresponding ones in Python:
+types_dict = {'integer': int, 'double': float, 'character': str, 
+              'complex': complex, 'logical': bool}
+
+# So we can directly go from the dictionary dim to [2, 2]:
+if d['attributes'] == {}:
+    return [types_dict[d['type']](d['value'][i]) for i in range(
+                                                               len(d['value'])
+                                                               )]
+
+# We can do this recursively, taking care of a few special cases (like type = 
+# NULL and type = list). That covers the first_sweep function. 
+
+# Note: I had made a choice that if first_sweep encounters a list with only one 
+# element (like [0]), I would convert it to the single element itself (0). 
+# This is very common in R because almost everything is a vector, even a single 
+# value is a vector of length 1. I am wondering if this was the right choice.
+
+# After running first_sweep on our m_serial_json_loads, we will get this:
+```
+
+```{python, echo=FALSE, eval=TRUE}
+import json
+types_dict = {'integer': int, 'double': float, 'character': str, 
+              'complex': complex, 'logical': bool}
+
+def first_sweep(d):
+    if isinstance(d, list):
+        if len(d) == 1:
+            return first_sweep(d[0])
+        else:
+            return list([first_sweep(d[i]) for i in range(len(d))])
+    elif not isinstance(d, dict):
+        return d
+    else:
+        if 'type' not in d:
+            return dict((k, first_sweep(v)) for (k, v) in d.items())
+        elif d['type'] == 'NULL':
+            return None
+        elif d['type'] == 'list':
+            tempd = {'value': first_sweep(d['value'])}
+            if 'attributes' not in d:
+                return tempd['value']
+            else:
+                for key in d['attributes']:
+                    tempd[key] = first_sweep(d['attributes'][key])
+                return tempd
+        else:
+            templist = list(map(lambda val: types_dict[d['type']](val) if val != 'NA' else 'NA', d['value']))
+            if len(templist) == 1:
+                templist = templist[0]
+            if d['attributes'] == {}:
+                return templist
+            else:
+                tempd = {'value': templist}
+                for key in d['attributes']:
+                    tempd[key] = first_sweep(d['attributes'][key])
+                return tempd
+
+m_serial_json = '{"type":"double","attributes":{"dim":{"type":"integer",\
+                  "attributes":{},"value":[2,2]},"dimnames":{"type":"list",\
+                  "attributes":{},"value":[{"type":"character","attributes":{},\
+                  "value":["a","b"]},{"type":"character","attributes":{},\
+                  "value":["c","d"]}]}},"value":[1,2,3,4]}'
+
+m_serial_json_loads = json.loads(m_serial_json)
+
+print(first_sweep(m_serial_json_loads))
+
+```
+
+```{python}
+# It's already starting to look better. But we can improve it further.
+# In the dimnames dictionary, there's only one key left now, value. So we can 
+# just convert it to a list directly. After that, we have three keys in the 
+# overall dictionary: value, dim and dimnames. So we know that it must be a 
+# matrix. We can convert this directly to a 2D array. 
+
+# Note: I've made another choice here. When we have a matrix like this, 
+# instead of converting it to 
+# [[1.0, 3.0], 
+#  [2.0, 4.0]] 
+# and sending the dimnames separately, I've chosen to include them within the 
+# matrix, like so:
+# [[None, 'c', 'd']
+#  ['a',  1.0, 3.0]
+#  ['b',  2.0, 4.0]]
+# I can't remember the justification behind this choice, but if you don't like 
+# this, it would be easy enough to change. 
+
+# second_sweep takes care of a lot of other possibilities. To see all of those, 
+# one would have to run all the functions in dsBaseClient and see what output 
+# each one produces. The documentation on the DataSHIELD wiki contains example 
+# calls which could be extracted and run via rpy2 to see what output they 
+# produce.
+```
+
+### Other important points
+
+#### Not everything works
+If you ever plan on using protocol_DataSHIELD in some demonstrations, please note that there are some functions that do not run, like ds.boxPlot (it doesn't even run in R, not even the exact command given by the people writing the documentation for DataSHIELD) and a couple others. So you might want to check beforehand if a function runs before presenting.
+
+#### Warning logging
+The reason behind the name 'warnerror' is that in older versions of rpy2, warnings generated by R used to be printed to the console using the consolewrite_warnerror function. But this has changed in newer versions and now, the logging module is used instead. This is problematic if you don't have logging enabled, and even if you do, you would want to send these warnings to the client in real time and not store them away in logs on the server side. To see some problems with this, run the following:
+
+```{python}
+# Python
+import rpy2
+from rpy2.robjects import r
+import rpy2.rinterface_lib
+import sys
+
+rpy2.rinterface_lib.callbacks.consolewrite_warnerror = sys.stdout.write
+rpy2.rinterface_lib.callbacks.consolewrite_print = sys.stdout.write
+
+f = r('f <- function () {warning("warn"); return(1)}')
+f()
+fe = r('fe <- function (){stop("error")}')
+fe()
+
+# You will notice that when the first function ran, it did not show the warning 
+# at all. The warning was later shown when an error was raised by rpy2. Also, 
+# the warning did not show the name of the function that gave the warning.
+# This will have to be taken care of by exploring the logging module and how it 
+# is used for rpy2 warnings.
+```
+
+#### Relative imports
+Relative imports within plugins will not be possible because during the discovery of microservices, class files are loaded using importlib.util.spec_from_file_location. When doing it this way, the module attribute `__package__` is empty (but the `__file__` attribute is not). Hence, relative imports are impossible. I did not want to assume any directory structure on the server, about where the protocol_DataSHIELD repo would be kept within the fdrtd directory. But I could assume that the structure of protocol_DataSHIELD itself had not changed so I decided to also import the helpers module using spec_from_file_location. 
+
+#### DSI choices
+```{r}
+# R
+
+# DSI has many functions, which can be listed as follows:
+library('DSI')
+base::ls('package:DSI') # You could have directly written ls('package:DSI'), but
+                        # I just wanted to highlight how the builtin functions 
+                        # of R can be accessed in rpy2 using the base package
+```
+
+```{r, eval=TRUE, echo=FALSE}
+suppressMessages(library('DSI'))
+base::ls('package:DSI')
+```
+
+```{r}
+# It contains many functions, but I think any of these whose names do not begin 
+# with 'datashield.' should not be made available to the client. 
+# Also, among those who begin with 'datashield.', I've created a list of 
+# functions that could be made available:
+# !/login
+# !/logout
+# /assign
+# assign.expr
+# /assign.resource
+# assign.table
+# /aggregate
+# !/connections
+# !/connections_default
+# connections_find
+# !/errors
+# /workspaces
+# /workspace_save
+# /workspace_rm
+# /symbols
+# /rm (symbol_rm)
+# /tables
+# /table_status
+# /resources
+# /resource_status
+# /pkg_status
+# /method_status
+# /methods
+# /profiles
+
+# a '!' indicates already implemented, a '/' indicates that it could be 
+# implemented and the others are either already covered or should not be 
+# implemented
+```
+
+## Order of names
+In `Python`, dictionary keys do not have an order. When data is sent to the client (for example, a list in R returned by ds.quantileMean, which has the labels '5%', '10%', etc., with corresponding values, the order will not go from smallest to largest when it has passes as a {label:value} dictionary in Json). The easiest way to solve this would be to stop using dictionaries and send the labels and values as two separate arrays: {'names': [], 'values': []}.
