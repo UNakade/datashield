@@ -5,16 +5,12 @@
 # python -m fdrtd.webserver --port=5000
 
 # Now on the client side:
-# Initializing the fdrtd api:
-import fdrtd # this is different from the fdrtd repository cloned above.
-# It refers to the client-side fdrtd library to be installed using "pip install fdrtd".
-# IMPORTANT: the client side library should be installed in a separate virtual environment.
-# Otherwise, it will conflict with the fdrtd server repository mentioned above.
-interface = fdrtd.HttpInterface("http://localhost:5000")  # insert appropriate server url here
-api = fdrtd.Api(interface)
+# Initializing the representation API:
+import representation
+api = representation.Api("http://localhost:5000")
 
 # Selecting the DataSHIELD login microservice:
-login = api.select_microservice(protocol='DataSHIELD', microservice='login')
+login = api.create(protocol='DataSHIELD', microservice='login')
 # Defining required variables for logging in:
 
 # list_of_servers is a list of kwargs dictionaries which will be passed on to the
@@ -39,15 +35,15 @@ login_callback = login.login(list_of_servers=list_of_servers, assign=True, symbo
 # the function call.
 
 def result(function_callback):
-    status_old = function_callback.get_status()
+    status_old = api.download(function_callback.get_status())
     print(''.join(status_old['warnerror']), end='')
     while status_old['busy']:
-        status_new = function_callback.get_status()
+        status_new = api.download(function_callback.get_status())
         if len(status_new['warnerror']) != len(status_old['warnerror']):
             print(''.join(status_new['warnerror'][len(status_old['warnerror']):]), end='')
         status_old = status_new
     print(''.join(status_old['print']))
-    return function_callback.get_result()
+    return api.download(function_callback.get_result())
 
 connection_callback = result(login_callback)
 # The end result of a login function called on the login microservice is a connection callback. You
