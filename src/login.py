@@ -62,14 +62,16 @@ class Login(Microservice):
             self.storage[uuid]['busy'] = False
             raise helpers.handle_error(str(err), 'login')
         self.storage[uuid]['busy'] = False
-        connection_microservice_uuid = self.bus.select_microservice(
-            requirements={'protocol': 'DataSHIELD', 'microservice': 'connection'}
+        connection_microservice_uuid = self.bus.create_representation(body={
+            'args': (),
+            'kwargs': {'protocol': 'DataSHIELD', 'microservice': 'connection'}
+        })
+        connect_function_representation_uuid = self.bus.create_attribute(connection_microservice_uuid, 'connect')
+        connect_result_representation_uuid = self.bus.call_representation(
+            representation_uuid=connect_function_representation_uuid,
+            body={'args': (), 'kwargs': {'connection': connection, 'uuid': uuid}}
         )
-        self.connection_callbacks_storage[uuid] = self.bus.call_microservice(
-            handle=connection_microservice_uuid,
-            function='connect',
-            parameters={'connection': connection, 'uuid': uuid}
-        )
+        self.connection_callbacks_storage[uuid] = self.bus.lut_uuid_to_repr[connect_result_representation_uuid]
         return None
 
     def get_status(self, callback):

@@ -1,7 +1,7 @@
 # This example assumes that the fdrtd webserver is running on http://localhost:5000
 # which is very easy to do, just follow these 3 steps:
 # git clone https://github.com/fdrtd/fdrtd
-# git clone https://github.com/fdrtd/protocol_DataSHIELD ./fdrtd/protocol_DataSHIELD
+# git clone https://github.com/fdrtd/protocol_DataSHIELD ./fdrtd/plugins/protocol_DataSHIELD
 # python -m fdrtd.webserver --port=5000
 
 # Now on the client side:
@@ -29,10 +29,12 @@ list_of_servers = [
 
 login_callback = login.login(list_of_servers=list_of_servers, assign=True, symbol='D')
 # with protocol_DataSHIELD, you can print the progress of any function live, just like it is visible
-# in R when a function is called, a function_callback is returned to the client while the function
+# in R. When a function is called, a function_callback is returned to the client while the function
 # keeps running on the server in a separate thread. While it is running, you can use the
-# following "result" function to get the live progress bar it will also return the end result of
-# the function call.
+# following "result" function to get the live progress bar. It will also return the end result of
+# the function call. However, if the function call returns a callback object, the result function
+# will return the required representation.Representation object instead, which can be used just like
+# a callback object.
 
 def result(function_callback):
     status_old = api.download(function_callback.get_status())
@@ -43,7 +45,12 @@ def result(function_callback):
             print(''.join(status_new['warnerror'][len(status_old['warnerror']):]), end='')
         status_old = status_new
     print(''.join(status_old['print']))
-    return api.download(function_callback.get_result())
+    function_callback_get_result = function_callback.get_result()
+    downloaded = api.download(function_callback_get_result)
+    if isinstance(downloaded, dict):
+        if (('handle' in downloaded) & ('callback' in downloaded)):
+            return function_callback_get_result
+    return downloaded
 
 connection_callback = result(login_callback)
 # The end result of a login function called on the login microservice is a connection callback. You
