@@ -25,7 +25,7 @@ The plugin is written in `Python` and uses the `rpy2` library.
 # server-side installation
 
     pip install fdrtd
-    pip install fdrtd-simon
+    pip install fdrtd-datashield
     python -m fdrtd.webserver --port=...
 
 
