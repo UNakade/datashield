@@ -1,3 +1,6 @@
+![license](https://img.shields.io/github/license/fdrtd/datashield)
+
+
 ## `DataSHIELD` plugin for `fdrtd` server
 
 This plugin allows `fdrtd` clients to use `DataSHIELD`.
