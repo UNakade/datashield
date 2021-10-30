@@ -1,4 +1,5 @@
 ![license](https://img.shields.io/github/license/fdrtd/datashield)
+![CodeQL](https://github.com/fdrtd/datashield/workflows/CodeQL/badge.svg)
 
 
 ## `DataSHIELD` plugin for `fdrtd` server
