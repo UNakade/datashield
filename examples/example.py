@@ -7,7 +7,7 @@
 # Now on the client side:
 # Initializing the representation API:
 import representation
-api = representation.Api("http://127.0.0.1:5000")
+api = representation.Api("http://127.0.0.1:55500")
 
 # Selecting the DataSHIELD login microservice:
 login = api.create(protocol='DataSHIELD', microservice='login')
