@@ -1,8 +1,6 @@
 import functools
 import uuid as _uuid
 from threading import Thread
-import importlib.util
-from pathlib import Path
 
 import rpy2
 import rpy2.rinterface
@@ -11,12 +9,7 @@ from rpy2.robjects.packages import importr
 
 import fdrtd.server
 from fdrtd.server.microservice import Microservice
-try:
-    from fdrtd.plugins.protocol_DataSHIELD.src import helpers
-except ImportError:
-    spec_helpers = importlib.util.spec_from_file_location('helpers', Path(__file__).resolve().parent / 'helpers.py')
-    helpers = importlib.util.module_from_spec(spec_helpers)
-    spec_helpers.loader.exec_module(helpers)
+from fdrtd.plugins.datashield import helpers
 
 consolewrite_warnerror_backup = rpy2.rinterface_lib.callbacks.consolewrite_warnerror
 consolewrite_print_backup = rpy2.rinterface_lib.callbacks.consolewrite_print

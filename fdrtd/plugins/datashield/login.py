@@ -1,7 +1,5 @@
 import uuid as _uuid
 from threading import Thread
-import importlib.util
-from pathlib import Path
 
 import rpy2
 import rpy2.rinterface
@@ -11,12 +9,7 @@ from rpy2.robjects import r
 
 import fdrtd.server
 from fdrtd.server.microservice import Microservice
-try:
-    from fdrtd.plugins.protocol_DataSHIELD.src import helpers
-except ImportError:
-    spec_helpers = importlib.util.spec_from_file_location('helpers', Path(__file__).resolve().parent / 'helpers.py')
-    helpers = importlib.util.module_from_spec(spec_helpers)
-    spec_helpers.loader.exec_module(helpers)
+from fdrtd.plugins.datashield import helpers
 
 consolewrite_warnerror_backup = rpy2.rinterface_lib.callbacks.consolewrite_warnerror
 consolewrite_print_backup = rpy2.rinterface_lib.callbacks.consolewrite_print
@@ -62,14 +55,11 @@ class Login(Microservice):
             self.storage[uuid]['busy'] = False
             raise helpers.handle_error(str(err), 'login')
         self.storage[uuid]['busy'] = False
-        connection_microservice_uuid = self.bus.select_microservice(
-            requirements={'protocol': 'DataSHIELD', 'microservice': 'connection'}
-        )
-        self.connection_callbacks_storage[uuid] = self.bus.call_microservice(
-            handle=connection_microservice_uuid,
-            function='connect',
-            parameters={'connection': connection, 'uuid': uuid}
-        )
+        for key in self.bus.microservices:
+            if [self.bus.microservices[key]['identifiers'].get(identifier)
+                    for identifier in ['protocol', 'microservice']] == ['DataSHIELD', 'connection']:
+                self.connection_callbacks_storage[uuid] = \
+                    self.bus.microservices[key]['instance'].connect(connection, uuid)
         return None
 
     def get_status(self, callback):
