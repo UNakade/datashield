@@ -1,12 +1,13 @@
-# This example assumes that the fdrtd webserver with datashield plugin is running on
-# http://localhost:55500, which is very easy to do, just follow these steps:
-# pip install fdrtd fdrtd-datashield
-# python -m fdrtd.webserver --port=55500
+# This example assumes that the fdrtd webserver is running on http://localhost:55501
+# which is very easy to do, just follow these 3 steps:
+# pip install fdrtd
+# pip install fdrtd-datashield
+# python -m fdrtd.webserver --port=55501
 
 # Now on the client side:
 # Initializing the representation API:
-import representation # can be installed with `pip install representation`
-api = representation.Api("http://127.0.0.1:55500")
+import fdrtd.clients.python
+api = fdrtd.clients.python.Api("http://127.0.0.1:55501")
 
 # Selecting the DataSHIELD login microservice:
 login = api.create(protocol='DataSHIELD', microservice='login')
