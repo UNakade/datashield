@@ -46,6 +46,8 @@ def result(function_callback):
         status_old = status_new
     print(''.join(status_old['print']))
     function_callback_get_result = function_callback.get_result()
+    if function_callback_get_result is None:
+        return None
     downloaded = api.download(function_callback_get_result)
     if isinstance(downloaded, dict):
         if (('handle' in downloaded) & ('callback' in downloaded)):
